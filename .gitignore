@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # WHOOP tokens
 tokens.json
 *.token
+
+.DS_Store
+.idea/
