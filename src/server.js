@@ -4,8 +4,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { whoop } from "./whoop.js";
+import * as format from "./format.js";
 
-const server = new McpServer({ name: "whoop", version: "1.0.0" });
+const server = new McpServer({ name: "whoop", version: "1.1.0" });
 
 const days = z
   .number()
@@ -13,10 +14,11 @@ const days = z
   .min(1)
   .max(90)
   .default(7)
-  .describe("Aantal dagen terug (1-90, standaard 7)");
+  .describe("Number of days to look back (1-90, default 7)");
 
+// Compacte JSON (zonder inspringing) scheelt tokens.
 function asText(data) {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(data) }] };
 }
 
 async function safe(fn) {
@@ -27,54 +29,76 @@ async function safe(fn) {
   }
 }
 
-server.tool(
+const recovery = async (n) => (await whoop.recovery(n)).map(format.recovery);
+const sleep = async (n) => (await whoop.sleep(n)).map(format.sleep);
+const strain = async (n) => (await whoop.cycles(n)).map(format.cycle);
+const workouts = async (n) => (await whoop.workouts(n)).map(format.workout);
+
+server.registerTool(
   "get_profile",
-  "WHOOP-profiel en lichaamsmaten (lengte, gewicht, max hartslag).",
-  {},
-  () => safe(async () => ({ profile: await whoop.profile(), body: await whoop.body() }))
+  { description: "WHOOP profile and body measurements (height, weight, max heart rate)." },
+  () =>
+    safe(async () => {
+      const [profile, body] = await Promise.all([whoop.profile(), whoop.body()]);
+      return format.profile(profile, body);
+    })
 );
 
-server.tool(
+server.registerTool(
   "get_recovery",
-  "Recovery-scores per dag: recovery %, HRV (rmssd), rusthartslag, SpO2, huidtemperatuur.",
-  { days },
-  ({ days }) => safe(() => whoop.recovery(days))
+  {
+    description:
+      "Daily recovery: recovery %, HRV (rmssd, ms), resting heart rate, SpO2, skin temperature.",
+    inputSchema: { days },
+  },
+  ({ days }) => safe(() => recovery(days))
 );
 
-server.tool(
+server.registerTool(
   "get_sleep",
-  "Slaapdata: duur, slaapfases (licht/diep/REM), efficiëntie, performance, ademhaling.",
-  { days },
-  ({ days }) => safe(() => whoop.sleep(days))
+  {
+    description:
+      "Sleep per night: bedtime/wake time (local), hours asleep, light/deep/REM, sleep needed, performance, efficiency, consistency, respiratory rate.",
+    inputSchema: { days },
+  },
+  ({ days }) => safe(() => sleep(days))
 );
 
-server.tool(
+server.registerTool(
   "get_strain",
-  "Dagelijkse cycles: strain-score, calorieën (kJ), gemiddelde en max hartslag.",
-  { days },
-  ({ days }) => safe(() => whoop.cycles(days))
+  {
+    description: "Daily strain: strain score, calories (kcal), average and max heart rate.",
+    inputSchema: { days },
+  },
+  ({ days }) => safe(() => strain(days))
 );
 
-server.tool(
+server.registerTool(
   "get_workouts",
-  "Workouts: sport, duur, strain, hartslagzones, calorieën.",
-  { days },
-  ({ days }) => safe(() => whoop.workouts(days))
+  {
+    description:
+      "Workouts: sport, start time, duration, strain, calories, distance, minutes in heart rate zones 0-5.",
+    inputSchema: { days },
+  },
+  ({ days }) => safe(() => workouts(days))
 );
 
-server.tool(
+server.registerTool(
   "get_overview",
-  "Compleet overzicht van recovery, slaap, strain en workouts in één keer. Handig voor trends en advies.",
-  { days },
+  {
+    description:
+      "Recovery, sleep, strain and workouts in one call. Best starting point for trends and health advice.",
+    inputSchema: { days },
+  },
   ({ days }) =>
     safe(async () => {
-      const [recovery, sleep, strain, workouts] = await Promise.all([
-        whoop.recovery(days),
-        whoop.sleep(days),
-        whoop.cycles(days),
-        whoop.workouts(days),
+      const [rec, slp, str, wrk] = await Promise.all([
+        recovery(days),
+        sleep(days),
+        strain(days),
+        workouts(days),
       ]);
-      return { days, recovery, sleep, strain, workouts };
+      return { days, recovery: rec, sleep: slp, strain: str, workouts: wrk };
     })
 );
 
