@@ -41,10 +41,19 @@ async function refresh(tokens) {
   return saveTokens(data);
 }
 
-export async function getAccessToken({ force = false } = {}) {
-  let tokens = loadTokens();
-  if (force || Date.now() >= tokens.expires_at) {
-    tokens = await refresh(tokens);
-  }
-  return tokens.access_token;
+// Lopende refresh, gedeeld door parallelle requests. WHOOP roteert refresh
+// tokens, dus twee gelijktijdige refreshes met hetzelfde token laten er één falen.
+let refreshing = null;
+
+// `rejected`: access token dat net een 401 kreeg. Is dat token al vervangen
+// (door een andere request), dan gebruiken we gewoon het nieuwe.
+export async function getAccessToken({ rejected } = {}) {
+  const tokens = loadTokens();
+  const stale = rejected ? tokens.access_token === rejected : Date.now() >= tokens.expires_at;
+  if (!stale) return tokens.access_token;
+
+  refreshing ??= refresh(tokens).finally(() => {
+    refreshing = null;
+  });
+  return (await refreshing).access_token;
 }

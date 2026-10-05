@@ -1,19 +1,39 @@
-import { API_BASE } from "./config.js";
+import { API_BASE, CONFIG_ERROR } from "./config.js";
 import { getAccessToken } from "./tokens.js";
 
-async function request(path, params = {}, retried = false) {
+const TIMEOUT_MS = 15_000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function request(path, params = {}, { rejected, rateLimited = false } = {}) {
+  if (CONFIG_ERROR) throw new Error(CONFIG_ERROR);
+
   const url = new URL(API_BASE + path);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) url.searchParams.set(key, value);
   }
 
-  const token = await getAccessToken({ force: retried });
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const token = await getAccessToken({ rejected });
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === "TimeoutError") throw new Error("WHOOP API reageert niet (timeout).");
+    throw err;
+  }
 
-  if (response.status === 401 && !retried) return request(path, params, true);
-  if (response.status === 429) throw new Error("WHOOP rate limit bereikt, probeer het zo opnieuw.");
+  if (response.status === 401 && !rejected) {
+    return request(path, params, { rejected: token, rateLimited });
+  }
+  if (response.status === 429) {
+    if (rateLimited) throw new Error("WHOOP rate limit bereikt, probeer het zo opnieuw.");
+    // Eén keer opnieuw proberen na Retry-After (max 10 seconden).
+    const wait = Math.min(Number(response.headers.get("retry-after")) || 2, 10);
+    await sleep(wait * 1000);
+    return request(path, params, { rejected, rateLimited: true });
+  }
   if (!response.ok) throw new Error(`WHOOP API ${response.status}: ${await response.text()}`);
   return response.json();
 }

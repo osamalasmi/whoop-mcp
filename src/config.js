@@ -29,7 +29,9 @@ export const SCOPES = [
   "read:body_measurement",
 ].join(" ");
 
-if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error("WHOOP_CLIENT_ID of WHOOP_CLIENT_SECRET ontbreekt in .env");
-  process.exit(1);
-}
+// Niet meteen afsluiten: dan toont Claude Desktop alleen "server disconnected".
+// De tools geven deze melding terug, zodat je ziet wat er mis is.
+export const CONFIG_ERROR =
+  !CLIENT_ID || !CLIENT_SECRET
+    ? `WHOOP_CLIENT_ID of WHOOP_CLIENT_SECRET ontbreekt in ${path.join(ROOT, ".env")}`
+    : null;

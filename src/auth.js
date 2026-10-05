@@ -3,7 +3,7 @@
 // en slaat de tokens op in tokens.json.
 import http from "node:http";
 import crypto from "node:crypto";
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
   CLIENT_ID,
   CLIENT_SECRET,
@@ -11,8 +11,14 @@ import {
   AUTH_URL,
   TOKEN_URL,
   SCOPES,
+  CONFIG_ERROR,
 } from "./config.js";
 import { saveTokens } from "./tokens.js";
+
+if (CONFIG_ERROR) {
+  console.error(CONFIG_ERROR);
+  process.exit(1);
+}
 
 const redirect = new URL(REDIRECT_URI);
 const state = crypto.randomBytes(16).toString("hex");
@@ -69,8 +75,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(Number(redirect.port) || 80, () => {
+// Alleen op deze Mac luisteren, niet op het hele netwerk.
+server.listen(Number(redirect.port) || 80, "127.0.0.1", () => {
   console.log("Open deze link om in te loggen bij WHOOP:\n");
   console.log(authLink.toString() + "\n");
-  if (process.platform === "darwin") exec(`open "${authLink}"`);
+  if (process.platform === "darwin") execFile("open", [authLink.toString()]);
 });
